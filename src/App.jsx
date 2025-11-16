@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Send, MessageSquare, CheckCircle, X, Package, Bell, BellOff, ExternalLink, Upload, AlertCircle, Clock } from 'lucide-react';
+import { db } from './firebase';
+import { collection, addDoc, onSnapshot, updateDoc, doc, query, orderBy } from 'firebase/firestore';
 
 export default function SnowStudios() {
   const [showModal, setShowModal] = useState(false);
@@ -20,6 +22,21 @@ export default function SnowStudios() {
     roblox: '',
     description: ''
   });
+
+  // Buscar pedidos do Firebase em tempo real
+  useEffect(() => {
+    const q = query(collection(db, 'requests'), orderBy('timestamp', 'desc'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const requestsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setRequests(requestsData);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if ('Notification' in window) {
@@ -47,78 +64,98 @@ export default function SnowStudios() {
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!formData.discord || !formData.roblox || !formData.description) {
       alert('Por favor, preencha todos os campos!');
       return;
     }
     
-    const newRequest = {
-      id: Date.now(),
-      ...formData,
-      status: 'pending',
-      timestamp: new Date().toLocaleString('pt-BR')
-    };
-    setRequests([...requests, newRequest]);
-    setUserDiscord(formData.discord);
-    setFormData({ discord: '', roblox: '', description: '' });
-    setShowModal(false);
-    setShowSuccessMessage(true);
+    try {
+      await addDoc(collection(db, 'requests'), {
+        discord: formData.discord,
+        roblox: formData.roblox,
+        description: formData.description,
+        status: 'pending',
+        timestamp: new Date().toISOString(),
+        createdAt: Date.now()
+      });
+      
+      setUserDiscord(formData.discord);
+      setFormData({ discord: '', roblox: '', description: '' });
+      setShowModal(false);
+      setShowSuccessMessage(true);
+    } catch (error) {
+      console.error('Erro ao criar pedido:', error);
+      alert('Erro ao enviar pedido. Tente novamente!');
+    }
   };
 
-  const handleAdminResponse = (requestId, price, deadline, gamepassLink) => {
-    const updatedRequests = requests.map(req => {
-      if (req.id === requestId) {
-        return { ...req, status: 'responded', price, deadline, gamepassLink };
-      }
-      return req;
-    });
-    setRequests(updatedRequests);
-    sendNotification('Snow Studios', 'O administrador respondeu sua solicitação!');
-    alert('Resposta enviada ao cliente!');
+  const handleAdminResponse = async (requestId, price, deadline, gamepassLink) => {
+    try {
+      await updateDoc(doc(db, 'requests', requestId), {
+        status: 'responded',
+        price,
+        deadline,
+        gamepassLink
+      });
+      
+      sendNotification('Snow Studios', 'O administrador respondeu sua solicitação!');
+      alert('Resposta enviada ao cliente!');
+    } catch (error) {
+      console.error('Erro ao responder:', error);
+      alert('Erro ao enviar resposta!');
+    }
   };
 
-  const handleMarkAsReady = (requestId) => {
-    const updatedRequests = requests.map(req => {
-      if (req.id === requestId) {
-        return { ...req, status: 'ready_for_payment' };
-      }
-      return req;
-    });
-    setRequests(updatedRequests);
-    sendNotification('Snow Studios - Pedido Pronto!', 'Seu pedido está pronto! Realize o pagamento.');
-    alert('Cliente notificado que o pedido está pronto!');
+  const handleMarkAsReady = async (requestId) => {
+    try {
+      await updateDoc(doc(db, 'requests', requestId), {
+        status: 'ready_for_payment'
+      });
+      
+      sendNotification('Snow Studios - Pedido Pronto!', 'Seu pedido está pronto! Realize o pagamento.');
+      alert('Cliente notificado que o pedido está pronto!');
+    } catch (error) {
+      console.error('Erro ao marcar como pronto:', error);
+      alert('Erro ao atualizar status!');
+    }
   };
 
-  const handleSubmitPaymentProof = () => {
+  const handleSubmitPaymentProof = async () => {
     if (!paymentProof.trim()) {
       alert('Por favor, cole o link da imagem do comprovante!');
       return;
     }
     
-    const updatedRequests = requests.map(req => {
-      if (req.id === selectedOrderForPayment) {
-        return { ...req, status: 'awaiting_approval', paymentProof };
-      }
-      return req;
-    });
-    setRequests(updatedRequests);
-    setPaymentProof('');
-    setShowPaymentModal(false);
-    setSelectedOrderForPayment(null);
-    alert('Comprovante enviado! Aguarde a aprovação.');
+    try {
+      await updateDoc(doc(db, 'requests', selectedOrderForPayment), {
+        status: 'awaiting_approval',
+        paymentProof
+      });
+      
+      setPaymentProof('');
+      setShowPaymentModal(false);
+      setSelectedOrderForPayment(null);
+      alert('Comprovante enviado! Aguarde a aprovação.');
+    } catch (error) {
+      console.error('Erro ao enviar comprovante:', error);
+      alert('Erro ao enviar comprovante!');
+    }
   };
 
-  const handleApprovePayment = (requestId, scriptLink) => {
-    const updatedRequests = requests.map(req => {
-      if (req.id === requestId) {
-        return { ...req, status: 'completed', scriptLink };
-      }
-      return req;
-    });
-    setRequests(updatedRequests);
-    sendNotification('Snow Studios - Pagamento Aprovado!', 'Seu pagamento foi aprovado!');
-    alert('Pagamento aprovado e script liberado!');
+  const handleApprovePayment = async (requestId, scriptLink) => {
+    try {
+      await updateDoc(doc(db, 'requests', requestId), {
+        status: 'completed',
+        scriptLink
+      });
+      
+      sendNotification('Snow Studios - Pagamento Aprovado!', 'Seu pagamento foi aprovado!');
+      alert('Pagamento aprovado e script liberado!');
+    } catch (error) {
+      console.error('Erro ao aprovar:', error);
+      alert('Erro ao aprovar pagamento!');
+    }
   };
 
   const handleAdminLogin = () => {
